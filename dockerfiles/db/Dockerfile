@@ -56,11 +56,6 @@ ENV LD_LIBRARY_PATH="${INSTALL_PREFIX}/lib"
 
 WORKDIR /home/app
 
-RUN which pg_config
-RUN pg_config --version
-RUN pg_config --libdir
-RUN ls $(pg_config --libdir)
-
 ENV HOME=/home/app \
   PATH=/home/app/.cargo/bin:/home/linuxbrew/.linuxbrew/bin:$PATH
 
