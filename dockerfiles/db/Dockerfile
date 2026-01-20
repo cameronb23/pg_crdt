@@ -1,52 +1,54 @@
-FROM debian:stable
+FROM debian:stable AS build
 
 # Install necessary dependencies
 RUN apt-get update && apt-get install -y \
-    build-essential \
-    curl \
-    file \
-    git \
-    wget \
-    libreadline-dev \
-    zlib1g-dev \
-    flex \
-    bison \
-    libxml2-dev \
-    libxslt-dev \
-    libssl-dev \
-    libpq-dev \
-    clang \
-    llvm \
-    gdb \
-    cmake \
-    python3 \
-    python3-pip \
-    ccache \
-    sudo \
-    && rm -rf /var/lib/apt/lists/*
+  autoconf \ 
+  build-essential \
+  curl \
+  file \
+  git \
+  wget \
+  libreadline-dev \
+  zlib1g-dev \
+  flex \
+  bison \
+  libxml2-dev \
+  libxslt-dev \
+  libssl-dev \
+  libpq-dev \
+  clang \
+  llvm \
+  gdb \
+  cmake \
+  python3 \
+  python3-pip \
+  ccache \
+  sudo \
+  && rm -rf /var/lib/apt/lists/*
 
 # Set environment variables
 ENV POSTGRES_REPO="https://github.com/postgres/postgres.git"
-# ENV COMMIT_HASH="c366d2bdba7c3b9b2cca1429d4535866e231ca55"
+ENV COMMIT_HASH="4b324845ba5d24682b9b3708a769f00d160afbd7"
 ENV INSTALL_PREFIX="/usr/local/pgsql"
 ENV PGDATA="/var/lib/postgresql/data"
 
 # Create a non-root user (just like the official image)
 RUN useradd -m -d /var/lib/postgresql -s /bin/bash postgres && \
-    mkdir -p $PGDATA && \
-    chown -R postgres:postgres /var/lib/postgresql
+  mkdir -p $PGDATA && \
+  chown -R postgres:postgres /var/lib/postgresql
 
 # Clone PostgreSQL source code and checkout specific commit
 WORKDIR /usr/src
-RUN git clone --depth 1 ${POSTGRES_REPO} postgres
+RUN git clone --depth 1 --branch REL_18_1 ${POSTGRES_REPO} postgres
 
 # Build PostgreSQL with debugging symbols
 WORKDIR /usr/src/postgres
+
 RUN ./configure --prefix=${INSTALL_PREFIX} --enable-debug --enable-cassert --without-icu && \
-    make -j$(nproc) && \
-    make install && \
-    cd contrib/pgcrypto && \
-    make && make install
+  make -j$(nproc) && \
+  make install && \
+  cd contrib/pgcrypto && \
+  make && make install
 
 # Add PostgreSQL binaries to the path
 ENV PATH="${INSTALL_PREFIX}/bin:${PATH}"
@@ -54,16 +56,22 @@ ENV LD_LIBRARY_PATH="${INSTALL_PREFIX}/lib"
 
 WORKDIR /home/app
 
+RUN which pg_config
+RUN pg_config --version
+RUN pg_config --libdir
+RUN ls $(pg_config --libdir)
+
 ENV HOME=/home/app \
   PATH=/home/app/.cargo/bin:/home/linuxbrew/.linuxbrew/bin:$PATH
-    
+
 RUN chown postgres:postgres /home/app
 RUN usermod -aG sudo postgres
 RUN echo "postgres ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
-    
+
 USER postgres
 
-RUN git clone https://github.com/automerge/automerge
+RUN git config --global init.defaultBranch main && \
+  git clone --depth 1 https://github.com/automerge/automerge
 RUN cd automerge
 
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
@@ -98,12 +106,20 @@ COPY . .
 RUN sudo chown -R postgres:postgres src
 RUN make && sudo make install PG_CONFIG=/usr/local/pgsql/bin/pg_config
 
+# # pgactive
+# RUN git clone --depth 1 https://github.com/aws/pgactive pgactive
+# RUN cd pgactive && sh ./configure && make PG_CONFIG=/usr/local/pgsql/bin/pg_config && sudo make install PG_CONFIG=/usr/local/pgsql/bin/pg_config
+
+FROM postgres:18.1 AS runner
+
+# Automerge
+COPY --from=build /usr/lib/libautomerge* /usr/lib
+COPY --from=build /usr/local/pgsql/lib/automerge.so /usr/lib/postgresql/18/lib
+COPY --from=build /usr/local/pgsql/share/extension/automerge* /usr/share/postgresql/18/extension
+
+# # pgactive
+# COPY --from=build /usr/local/pgsql/lib/pgactive.so /usr/lib/postgresql/18/lib
+# COPY --from=build /usr/local/pgsql/share/extension/pgactive* /usr/share/postgresql/18/extension
+
 # Expose PostgreSQL port
 EXPOSE 5432
-
-# Default entrypoint script
-RUN sudo cp dockerfiles/db/entrypoint.sh /usr/local/pgsql/bin/
-RUN sudo chmod +x /usr/local/pgsql/bin/entrypoint.sh
-
-ENTRYPOINT ["/usr/local/pgsql/bin/entrypoint.sh"]
-CMD ["postgres"]

@@ -5,3 +5,6 @@
 **/*.rs.bk
 Cargo.lock
 *.swp
+
+./automerge/**/*
+*.dylib
